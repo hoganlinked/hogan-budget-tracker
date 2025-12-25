@@ -17,6 +17,65 @@ const CATEGORIES = [
 
 const STATUS_OPTIONS = ['Not Started', 'In Progress', 'Complete']
 
+// Pre-populated with Hogan family financial data as of 2025-12-25
+const INITIAL_DATA = {
+  insurance: {
+    savings: '',
+    notes: 'Review auto insurance (2 vehicles: $20,855 + $17,697 loans). Shop for better rates.',
+    status: 'Not Started'
+  },
+  meals: {
+    savings: '500',
+    notes: 'Current: $700/mo dining out vs $200 budget = $500 overspend.\nAction: Meal prep Sundays, pack lunches, limit dining to 2x/week.',
+    status: 'In Progress'
+  },
+  energy: {
+    savings: '',
+    notes: 'Audit utility bills. Check for phantom loads, LED conversion, thermostat optimization.',
+    status: 'Not Started'
+  },
+  debt: {
+    savings: '',
+    notes: 'CRITICAL: Credit One AMEX OVER LIMIT ($2,738/$2,700).\nCapital One: $4,956/$5,000 (99%)\nComplex CC: $2,423/$3,000 (81%)\nTotal CC debt: $10,117\nTotal debt incl vehicles: $48,669\n\nPriority: Pay $39+ to Credit One immediately.',
+    status: 'In Progress'
+  },
+  tax: {
+    savings: '',
+    notes: 'WDT business unit income: $9,534/mo net. Review deductions for 2025 filing.',
+    status: 'Not Started'
+  },
+  transport: {
+    savings: '',
+    notes: 'Two vehicle loans: $20,855 + $17,697 = $38,552 total.\nOptimize fuel costs, maintenance scheduling.',
+    status: 'Not Started'
+  },
+  entertainment: {
+    savings: '300',
+    notes: 'Current: $400/mo alcohol vs $100 budget = $300 overspend.\nAction: Reduce bar visits, buy in bulk if drinking at home.',
+    status: 'In Progress'
+  },
+  healthcare: {
+    savings: '',
+    notes: 'Review health insurance options. Check HSA/FSA eligibility.',
+    status: 'Not Started'
+  },
+  shopping: {
+    savings: '',
+    notes: 'Implement 24-hour rule for purchases over $50. Use cash envelope system.',
+    status: 'Not Started'
+  },
+  home: {
+    savings: '',
+    notes: 'Monahans, TX location. Schedule preventive maintenance to avoid costly repairs.',
+    status: 'Not Started'
+  },
+  subscriptions: {
+    savings: '284',
+    notes: 'COMPLETED 2025-12-25: Canceled 11 subscriptions.\n\nCanceled ($284/mo saved):\n- InVideo AI ($128)\n- ART-GEN.AI ($60)\n- Adobe ($21)\n- Netlify ($21)\n- Disney+ ($14)\n- Suno AI ($11)\n- Obsidian Sync ($10)\n- D-ID ($6)\n- Proton ($5)\n- NY Times ($4)\n- Truthfinder ($4)\n\nRemaining 7 subscriptions: $187/mo',
+    status: 'Complete'
+  }
+}
+
 const DEFAULT_DATA = CATEGORIES.reduce((acc, cat) => {
   acc[cat.id] = { savings: '', notes: '', status: 'Not Started' }
   return acc
@@ -25,7 +84,7 @@ const DEFAULT_DATA = CATEGORIES.reduce((acc, cat) => {
 function App() {
   const [data, setData] = useState(() => {
     const saved = localStorage.getItem('hoganBudgetData')
-    return saved ? JSON.parse(saved) : DEFAULT_DATA
+    return saved ? JSON.parse(saved) : INITIAL_DATA
   })
 
   const [expandedCategory, setExpandedCategory] = useState(null)
@@ -55,7 +114,7 @@ function App() {
 
   const resetAll = () => {
     if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
-      setData(DEFAULT_DATA)
+      setData(INITIAL_DATA)
       localStorage.removeItem('hoganBudgetData')
     }
   }
