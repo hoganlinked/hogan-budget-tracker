@@ -15,6 +15,24 @@ const CATEGORIES = [
   { id: 'subscriptions', name: 'Subscriptions', icon: '📱', description: 'Audit and cancel unused subscriptions' },
 ]
 
+const BILL_CATEGORIES = [
+  { id: 'housing', name: 'Housing', icon: '🏠' },
+  { id: 'utilities', name: 'Utilities', icon: '💡' },
+  { id: 'insurance', name: 'Insurance', icon: '🛡️' },
+  { id: 'transportation', name: 'Transportation', icon: '🚗' },
+  { id: 'subscriptions', name: 'Subscriptions', icon: '📱' },
+  { id: 'debt', name: 'Debt Payments', icon: '💳' },
+  { id: 'healthcare', name: 'Healthcare', icon: '🏥' },
+  { id: 'other', name: 'Other', icon: '📋' },
+]
+
+const RECURRING_OPTIONS = [
+  { id: 'once', name: 'One-time' },
+  { id: 'monthly', name: 'Monthly' },
+  { id: 'quarterly', name: 'Quarterly' },
+  { id: 'annually', name: 'Annually' },
+]
+
 const STATUS_OPTIONS = ['Not Started', 'In Progress', 'Complete']
 
 const INITIAL_DATA = {
@@ -90,10 +108,29 @@ function App() {
     const saved = localStorage.getItem('hoganCalendarData')
     return saved ? JSON.parse(saved) : {}
   })
+  const [billsData, setBillsData] = useState(() => {
+    const saved = localStorage.getItem('hoganBillsData')
+    return saved ? JSON.parse(saved) : []
+  })
   const [expandedCategory, setExpandedCategory] = useState(null)
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [billsDate, setBillsDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
   const [modalData, setModalData] = useState({})
+  const [billModalOpen, setBillModalOpen] = useState(false)
+  const [editingBill, setEditingBill] = useState(null)
+  const [billFormData, setBillFormData] = useState({
+    name: '',
+    category: 'other',
+    amount: '',
+    dueDate: '',
+    recurring: 'once',
+    paid: false,
+    notes: ''
+  })
+  const [billsViewMode, setBillsViewMode] = useState('calendar')
+  const [billsFilter, setBillsFilter] = useState('all')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     localStorage.setItem('hoganBudgetData', JSON.stringify(data))
@@ -102,6 +139,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem('hoganCalendarData', JSON.stringify(calendarData))
   }, [calendarData])
+
+  useEffect(() => {
+    localStorage.setItem('hoganBillsData', JSON.stringify(billsData))
+  }, [billsData])
 
   const updateCategory = (categoryId, field, value) => {
     setData(prev => ({
@@ -126,8 +167,10 @@ function App() {
     if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
       setData(INITIAL_DATA)
       setCalendarData({})
+      setBillsData([])
       localStorage.removeItem('hoganBudgetData')
       localStorage.removeItem('hoganCalendarData')
+      localStorage.removeItem('hoganBillsData')
     }
   }
 
@@ -182,6 +225,14 @@ function App() {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
   }
 
+  const prevBillsMonth = () => {
+    setBillsDate(new Date(billsDate.getFullYear(), billsDate.getMonth() - 1, 1))
+  }
+
+  const nextBillsMonth = () => {
+    setBillsDate(new Date(billsDate.getFullYear(), billsDate.getMonth() + 1, 1))
+  }
+
   const openDateModal = (day) => {
     const dateKey = formatDateKey(currentDate.getFullYear(), currentDate.getMonth(), day)
     const existingData = calendarData[dateKey] || { categories: {}, notes: '' }
@@ -219,6 +270,195 @@ function App() {
     return ''
   }
 
+  // Bills functions
+  const generateBillId = () => {
+    return Date.now().toString(36) + Math.random().toString(36).substr(2)
+  }
+
+  const getBillsForDate = (dateKey) => {
+    return billsData.filter(bill => {
+      if (bill.dueDate === dateKey) return true
+      if (bill.recurring === 'once') return false
+
+      const billDate = new Date(bill.dueDate)
+      const checkDate = new Date(dateKey)
+
+      if (bill.recurring === 'monthly') {
+        return billDate.getDate() === checkDate.getDate() && checkDate >= billDate
+      }
+      if (bill.recurring === 'quarterly') {
+        const monthDiff = (checkDate.getFullYear() - billDate.getFullYear()) * 12 +
+                         (checkDate.getMonth() - billDate.getMonth())
+        return billDate.getDate() === checkDate.getDate() &&
+               monthDiff >= 0 && monthDiff % 3 === 0
+      }
+      if (bill.recurring === 'annually') {
+        return billDate.getMonth() === checkDate.getMonth() &&
+               billDate.getDate() === checkDate.getDate() &&
+               checkDate >= billDate
+      }
+      return false
+    })
+  }
+
+  const getMonthBills = () => {
+    const year = billsDate.getFullYear()
+    const month = billsDate.getMonth()
+    const { daysInMonth } = getMonthDays(year, month)
+    const monthBills = []
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateKey(year, month, day)
+      const dayBills = getBillsForDate(dateKey)
+      dayBills.forEach(bill => {
+        monthBills.push({ ...bill, displayDate: dateKey })
+      })
+    }
+
+    return monthBills
+  }
+
+  const getUpcomingBills = () => {
+    const today = new Date()
+    const upcoming = []
+
+    for (let i = 0; i <= 7; i++) {
+      const checkDate = new Date(today)
+      checkDate.setDate(today.getDate() + i)
+      const dateKey = formatDateKey(checkDate.getFullYear(), checkDate.getMonth(), checkDate.getDate())
+      const dayBills = getBillsForDate(dateKey).filter(b => !b.paid)
+      dayBills.forEach(bill => {
+        upcoming.push({ ...bill, displayDate: dateKey, daysUntil: i })
+      })
+    }
+
+    return upcoming
+  }
+
+  const getDaysUntilDue = (dateKey) => {
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const dueDate = new Date(dateKey)
+    const diffTime = dueDate - today
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+    return diffDays
+  }
+
+  const openBillModal = (dateKey = null, bill = null) => {
+    if (bill) {
+      setEditingBill(bill)
+      setBillFormData({
+        name: bill.name,
+        category: bill.category,
+        amount: bill.amount,
+        dueDate: bill.dueDate,
+        recurring: bill.recurring,
+        paid: bill.paid,
+        notes: bill.notes || ''
+      })
+    } else {
+      setEditingBill(null)
+      setBillFormData({
+        name: '',
+        category: 'other',
+        amount: '',
+        dueDate: dateKey || formatDateKey(billsDate.getFullYear(), billsDate.getMonth(), 1),
+        recurring: 'once',
+        paid: false,
+        notes: ''
+      })
+    }
+    setBillModalOpen(true)
+  }
+
+  const closeBillModal = () => {
+    setBillModalOpen(false)
+    setEditingBill(null)
+    setBillFormData({
+      name: '',
+      category: 'other',
+      amount: '',
+      dueDate: '',
+      recurring: 'once',
+      paid: false,
+      notes: ''
+    })
+  }
+
+  const saveBill = () => {
+    if (!billFormData.name || !billFormData.amount || !billFormData.dueDate) {
+      alert('Please fill in bill name, amount, and due date')
+      return
+    }
+
+    if (editingBill) {
+      setBillsData(prev => prev.map(b =>
+        b.id === editingBill.id ? { ...billFormData, id: editingBill.id } : b
+      ))
+    } else {
+      setBillsData(prev => [...prev, { ...billFormData, id: generateBillId() }])
+    }
+    closeBillModal()
+  }
+
+  const deleteBill = () => {
+    if (editingBill && confirm('Are you sure you want to delete this bill?')) {
+      setBillsData(prev => prev.filter(b => b.id !== editingBill.id))
+      closeBillModal()
+    }
+  }
+
+  const toggleBillPaid = (billId) => {
+    setBillsData(prev => prev.map(b =>
+      b.id === billId ? { ...b, paid: !b.paid } : b
+    ))
+  }
+
+  const getFilteredBills = () => {
+    let filtered = getMonthBills()
+
+    if (billsFilter === 'paid') {
+      filtered = filtered.filter(b => b.paid)
+    } else if (billsFilter === 'unpaid') {
+      filtered = filtered.filter(b => !b.paid)
+    }
+
+    if (searchQuery) {
+      filtered = filtered.filter(b =>
+        b.name.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    }
+
+    return filtered.sort((a, b) => new Date(a.displayDate) - new Date(b.displayDate))
+  }
+
+  const exportBillsCSV = () => {
+    const headers = ['Name', 'Category', 'Amount', 'Due Date', 'Recurring', 'Paid', 'Notes']
+    const rows = billsData.map(b => [
+      b.name,
+      BILL_CATEGORIES.find(c => c.id === b.category)?.name || b.category,
+      b.amount,
+      b.dueDate,
+      RECURRING_OPTIONS.find(r => r.id === b.recurring)?.name || b.recurring,
+      b.paid ? 'Yes' : 'No',
+      b.notes || ''
+    ])
+
+    const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `hogan-bills-${formatDateKey(billsDate.getFullYear(), billsDate.getMonth(), 1)}.csv`
+    a.click()
+  }
+
+  const monthBills = getMonthBills()
+  const totalBillsDue = monthBills.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0)
+  const totalPaid = monthBills.filter(b => b.paid).reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0)
+  const totalUnpaid = monthBills.filter(b => !b.paid).reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0)
+  const upcomingBills = getUpcomingBills()
+
   const renderCalendar = () => {
     const year = currentDate.getFullYear()
     const month = currentDate.getMonth()
@@ -228,12 +468,10 @@ function App() {
 
     const days = []
 
-    // Empty cells for days before the first of the month
     for (let i = 0; i < startingDay; i++) {
       days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>)
     }
 
-    // Days of the month
     for (let day = 1; day <= daysInMonth; day++) {
       const dateKey = formatDateKey(year, month, day)
       const dayTotal = getDayTotal(dateKey)
@@ -257,6 +495,60 @@ function App() {
     return days
   }
 
+  const renderBillsCalendar = () => {
+    const year = billsDate.getFullYear()
+    const month = billsDate.getMonth()
+    const { daysInMonth, startingDay } = getMonthDays(year, month)
+    const today = new Date()
+    const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
+
+    const days = []
+
+    for (let i = 0; i < startingDay; i++) {
+      days.push(<div key={`empty-${i}`} className="bills-calendar-day empty"></div>)
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateKey(year, month, day)
+      const dayBills = getBillsForDate(dateKey)
+      const isToday = isCurrentMonth && today.getDate() === day
+      const daysUntil = getDaysUntilDue(dateKey)
+      const hasUnpaid = dayBills.some(b => !b.paid)
+      const allPaid = dayBills.length > 0 && dayBills.every(b => b.paid)
+      const isDueSoon = hasUnpaid && daysUntil >= 0 && daysUntil <= 3
+      const isOverdue = hasUnpaid && daysUntil < 0
+
+      days.push(
+        <div
+          key={day}
+          className={`bills-calendar-day ${isToday ? 'today' : ''} ${dayBills.length > 0 ? 'has-bills' : ''} ${allPaid ? 'all-paid' : ''} ${isDueSoon ? 'due-soon' : ''} ${isOverdue ? 'overdue' : ''}`}
+          onClick={() => openBillModal(dateKey)}
+        >
+          <span className="day-number">{day}</span>
+          {dayBills.length > 0 && (
+            <div className="day-bills">
+              {dayBills.slice(0, 2).map((bill, idx) => (
+                <div
+                  key={idx}
+                  className={`day-bill-item ${bill.paid ? 'paid' : 'unpaid'}`}
+                  onClick={(e) => { e.stopPropagation(); openBillModal(dateKey, bill) }}
+                >
+                  <span className="bill-amount">${parseFloat(bill.amount).toFixed(0)}</span>
+                  {bill.paid && <span className="paid-check">✓</span>}
+                </div>
+              ))}
+              {dayBills.length > 2 && (
+                <span className="more-bills">+{dayBills.length - 2}</span>
+              )}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    return days
+  }
+
   const monthTotal = getMonthTotal()
   const daysWithEntries = getDaysWithEntries()
   const avgDaily = daysWithEntries > 0 ? monthTotal / daysWithEntries : 0
@@ -267,6 +559,18 @@ function App() {
         <h1>Hogan Budget Tracker</h1>
         <p className="subtitle">Track savings across 11 categories</p>
       </header>
+
+      {/* Upcoming Bills Alert */}
+      {upcomingBills.length > 0 && activeTab !== 'bills' && (
+        <div className="upcoming-alert" onClick={() => setActiveTab('bills')}>
+          <span className="alert-icon">⚠️</span>
+          <span className="alert-text">
+            {upcomingBills.length} bill{upcomingBills.length > 1 ? 's' : ''} due in next 7 days
+            (${upcomingBills.reduce((sum, b) => sum + parseFloat(b.amount), 0).toFixed(2)})
+          </span>
+          <span className="alert-arrow">→</span>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div className="nav-tabs">
@@ -282,7 +586,17 @@ function App() {
           onClick={() => setActiveTab('calendar')}
         >
           <span className="tab-icon">📅</span>
-          Calendar
+          Savings
+        </button>
+        <button
+          className={`nav-tab ${activeTab === 'bills' ? 'active' : ''}`}
+          onClick={() => setActiveTab('bills')}
+        >
+          <span className="tab-icon">💵</span>
+          Bills
+          {upcomingBills.length > 0 && (
+            <span className="tab-badge">{upcomingBills.length}</span>
+          )}
         </button>
       </div>
 
@@ -407,7 +721,6 @@ function App() {
       {/* Calendar View */}
       {activeTab === 'calendar' && (
         <div className="calendar-container">
-          {/* Monthly Summary */}
           <div className="calendar-summary">
             <div className="summary-card">
               <span className="summary-icon">💰</span>
@@ -432,7 +745,6 @@ function App() {
             </div>
           </div>
 
-          {/* Month Navigation */}
           <div className="calendar-nav">
             <button className="nav-btn" onClick={prevMonth}>◀ Prev</button>
             <h2 className="calendar-title">
@@ -441,17 +753,13 @@ function App() {
             <button className="nav-btn" onClick={nextMonth}>Next ▶</button>
           </div>
 
-          {/* Calendar Grid */}
           <div className="calendar-grid">
-            {/* Day Headers */}
             {DAY_NAMES.map(day => (
               <div key={day} className="calendar-header">{day}</div>
             ))}
-            {/* Calendar Days */}
             {renderCalendar()}
           </div>
 
-          {/* Legend */}
           <div className="calendar-legend">
             <div className="legend-item">
               <span className="legend-dot high"></span>
@@ -469,7 +777,205 @@ function App() {
         </div>
       )}
 
-      {/* Date Entry Modal */}
+      {/* Bills View */}
+      {activeTab === 'bills' && (
+        <div className="bills-container">
+          {/* Bills Summary */}
+          <div className="bills-summary">
+            <div className="summary-card">
+              <span className="summary-icon">💵</span>
+              <div className="summary-content">
+                <span className="summary-label">Total Due</span>
+                <span className="summary-value">${totalBillsDue.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="summary-card paid">
+              <span className="summary-icon">✅</span>
+              <div className="summary-content">
+                <span className="summary-label">Paid</span>
+                <span className="summary-value paid-value">${totalPaid.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="summary-card unpaid">
+              <span className="summary-icon">⏳</span>
+              <div className="summary-content">
+                <span className="summary-label">Unpaid</span>
+                <span className="summary-value unpaid-value">${totalUnpaid.toFixed(2)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Upcoming Bills Banner */}
+          {upcomingBills.length > 0 && (
+            <div className="upcoming-bills-banner">
+              <h4>⚠️ Upcoming Bills (Next 7 Days)</h4>
+              <div className="upcoming-list">
+                {upcomingBills.slice(0, 5).map((bill, idx) => (
+                  <div key={idx} className={`upcoming-item ${bill.daysUntil === 0 ? 'due-today' : bill.daysUntil <= 3 ? 'due-soon' : ''}`}>
+                    <span className="upcoming-name">{bill.name}</span>
+                    <span className="upcoming-amount">${parseFloat(bill.amount).toFixed(2)}</span>
+                    <span className="upcoming-days">
+                      {bill.daysUntil === 0 ? 'Today' : bill.daysUntil === 1 ? 'Tomorrow' : `${bill.daysUntil} days`}
+                    </span>
+                    <button
+                      className="quick-pay-btn"
+                      onClick={() => toggleBillPaid(bill.id)}
+                    >
+                      Mark Paid
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* View Toggle & Controls */}
+          <div className="bills-controls">
+            <div className="view-toggle">
+              <button
+                className={`toggle-btn ${billsViewMode === 'calendar' ? 'active' : ''}`}
+                onClick={() => setBillsViewMode('calendar')}
+              >
+                📅 Calendar
+              </button>
+              <button
+                className={`toggle-btn ${billsViewMode === 'list' ? 'active' : ''}`}
+                onClick={() => setBillsViewMode('list')}
+              >
+                📋 List
+              </button>
+            </div>
+            <button className="add-bill-btn" onClick={() => openBillModal()}>
+              + Add Bill
+            </button>
+          </div>
+
+          {billsViewMode === 'calendar' ? (
+            <>
+              {/* Bills Calendar Navigation */}
+              <div className="calendar-nav">
+                <button className="nav-btn" onClick={prevBillsMonth}>◀ Prev</button>
+                <h2 className="calendar-title">
+                  {MONTH_NAMES[billsDate.getMonth()]} {billsDate.getFullYear()}
+                </h2>
+                <button className="nav-btn" onClick={nextBillsMonth}>Next ▶</button>
+              </div>
+
+              {/* Bills Calendar Grid */}
+              <div className="bills-calendar-grid">
+                {DAY_NAMES.map(day => (
+                  <div key={day} className="calendar-header">{day}</div>
+                ))}
+                {renderBillsCalendar()}
+              </div>
+
+              {/* Bills Legend */}
+              <div className="bills-legend">
+                <div className="legend-item">
+                  <span className="legend-dot paid-dot"></span>
+                  <span>Paid</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-dot unpaid-dot"></span>
+                  <span>Unpaid</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-dot due-soon-dot"></span>
+                  <span>Due Soon</span>
+                </div>
+                <div className="legend-item">
+                  <span className="legend-dot overdue-dot"></span>
+                  <span>Overdue</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* List View Controls */}
+              <div className="list-controls">
+                <div className="filter-buttons">
+                  <button
+                    className={`filter-btn ${billsFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setBillsFilter('all')}
+                  >
+                    All
+                  </button>
+                  <button
+                    className={`filter-btn ${billsFilter === 'unpaid' ? 'active' : ''}`}
+                    onClick={() => setBillsFilter('unpaid')}
+                  >
+                    Unpaid
+                  </button>
+                  <button
+                    className={`filter-btn ${billsFilter === 'paid' ? 'active' : ''}`}
+                    onClick={() => setBillsFilter('paid')}
+                  >
+                    Paid
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  className="search-input"
+                  placeholder="Search bills..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+                <button className="export-btn" onClick={exportBillsCSV}>
+                  📥 Export CSV
+                </button>
+              </div>
+
+              {/* Bills List */}
+              <div className="bills-list">
+                {getFilteredBills().length === 0 ? (
+                  <div className="empty-state">
+                    <span className="empty-icon">📭</span>
+                    <p>No bills found for this month</p>
+                    <button className="add-bill-btn" onClick={() => openBillModal()}>
+                      + Add Your First Bill
+                    </button>
+                  </div>
+                ) : (
+                  getFilteredBills().map((bill, idx) => {
+                    const daysUntil = getDaysUntilDue(bill.displayDate)
+                    const catInfo = BILL_CATEGORIES.find(c => c.id === bill.category)
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`bill-item ${bill.paid ? 'paid' : 'unpaid'} ${!bill.paid && daysUntil < 0 ? 'overdue' : ''} ${!bill.paid && daysUntil >= 0 && daysUntil <= 3 ? 'due-soon' : ''}`}
+                      >
+                        <div className="bill-icon">{catInfo?.icon || '📋'}</div>
+                        <div className="bill-info">
+                          <h4>{bill.name}</h4>
+                          <p>{catInfo?.name || 'Other'} • Due {bill.displayDate}</p>
+                        </div>
+                        <div className="bill-amount">${parseFloat(bill.amount).toFixed(2)}</div>
+                        <div className="bill-actions">
+                          <button
+                            className={`paid-toggle ${bill.paid ? 'is-paid' : ''}`}
+                            onClick={() => toggleBillPaid(bill.id)}
+                          >
+                            {bill.paid ? '✓ Paid' : 'Mark Paid'}
+                          </button>
+                          <button
+                            className="edit-btn"
+                            onClick={() => openBillModal(bill.displayDate, bill)}
+                          >
+                            ✏️
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Date Entry Modal (Savings Calendar) */}
       {selectedDate && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -523,6 +1029,112 @@ function App() {
             <div className="modal-footer">
               <button className="modal-btn cancel" onClick={closeModal}>Cancel</button>
               <button className="modal-btn save" onClick={saveModalData}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bill Entry Modal */}
+      {billModalOpen && (
+        <div className="modal-overlay" onClick={closeBillModal}>
+          <div className="modal bill-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>💵 {editingBill ? 'Edit Bill' : 'Add New Bill'}</h3>
+              <button className="modal-close" onClick={closeBillModal}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="form-group">
+                <label>Bill Name *</label>
+                <input
+                  type="text"
+                  placeholder="e.g., Rent, Electric Bill, Internet"
+                  value={billFormData.name}
+                  onChange={(e) => setBillFormData(prev => ({ ...prev, name: e.target.value }))}
+                />
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Category</label>
+                  <select
+                    value={billFormData.category}
+                    onChange={(e) => setBillFormData(prev => ({ ...prev, category: e.target.value }))}
+                  >
+                    {BILL_CATEGORIES.map(cat => (
+                      <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label>Amount *</label>
+                  <div className="input-with-prefix">
+                    <span className="input-prefix">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={billFormData.amount}
+                      onChange={(e) => setBillFormData(prev => ({ ...prev, amount: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Due Date *</label>
+                  <input
+                    type="date"
+                    value={billFormData.dueDate}
+                    onChange={(e) => setBillFormData(prev => ({ ...prev, dueDate: e.target.value }))}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label>Recurring</label>
+                  <select
+                    value={billFormData.recurring}
+                    onChange={(e) => setBillFormData(prev => ({ ...prev, recurring: e.target.value }))}
+                  >
+                    {RECURRING_OPTIONS.map(opt => (
+                      <option key={opt.id} value={opt.id}>{opt.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group checkbox-group">
+                <label className="checkbox-label">
+                  <input
+                    type="checkbox"
+                    checked={billFormData.paid}
+                    onChange={(e) => setBillFormData(prev => ({ ...prev, paid: e.target.checked }))}
+                  />
+                  <span className="checkmark"></span>
+                  Mark as Paid
+                </label>
+              </div>
+
+              <div className="form-group">
+                <label>Notes</label>
+                <textarea
+                  placeholder="Add any notes about this bill..."
+                  value={billFormData.notes}
+                  onChange={(e) => setBillFormData(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={2}
+                />
+              </div>
+            </div>
+
+            <div className="modal-footer">
+              {editingBill && (
+                <button className="modal-btn delete" onClick={deleteBill}>Delete</button>
+              )}
+              <button className="modal-btn cancel" onClick={closeBillModal}>Cancel</button>
+              <button className="modal-btn save" onClick={saveBill}>Save Bill</button>
             </div>
           </div>
         </div>
