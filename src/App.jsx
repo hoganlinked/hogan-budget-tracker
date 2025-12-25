@@ -17,7 +17,6 @@ const CATEGORIES = [
 
 const STATUS_OPTIONS = ['Not Started', 'In Progress', 'Complete']
 
-// Pre-populated with Hogan family financial data as of 2025-12-25
 const INITIAL_DATA = {
   insurance: {
     savings: '',
@@ -76,22 +75,33 @@ const INITIAL_DATA = {
   }
 }
 
-const DEFAULT_DATA = CATEGORIES.reduce((acc, cat) => {
-  acc[cat.id] = { savings: '', notes: '', status: 'Not Started' }
-  return acc
-}, {})
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December']
+
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 function App() {
+  const [activeTab, setActiveTab] = useState('categories')
   const [data, setData] = useState(() => {
     const saved = localStorage.getItem('hoganBudgetData')
     return saved ? JSON.parse(saved) : INITIAL_DATA
   })
-
+  const [calendarData, setCalendarData] = useState(() => {
+    const saved = localStorage.getItem('hoganCalendarData')
+    return saved ? JSON.parse(saved) : {}
+  })
   const [expandedCategory, setExpandedCategory] = useState(null)
+  const [currentDate, setCurrentDate] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [modalData, setModalData] = useState({})
 
   useEffect(() => {
     localStorage.setItem('hoganBudgetData', JSON.stringify(data))
   }, [data])
+
+  useEffect(() => {
+    localStorage.setItem('hoganCalendarData', JSON.stringify(calendarData))
+  }, [calendarData])
 
   const updateCategory = (categoryId, field, value) => {
     setData(prev => ({
@@ -115,9 +125,141 @@ function App() {
   const resetAll = () => {
     if (confirm('Are you sure you want to reset all data? This cannot be undone.')) {
       setData(INITIAL_DATA)
+      setCalendarData({})
       localStorage.removeItem('hoganBudgetData')
+      localStorage.removeItem('hoganCalendarData')
     }
   }
+
+  // Calendar functions
+  const getMonthDays = (year, month) => {
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+    const daysInMonth = lastDay.getDate()
+    const startingDay = firstDay.getDay()
+    return { daysInMonth, startingDay }
+  }
+
+  const formatDateKey = (year, month, day) => {
+    return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  }
+
+  const getDayTotal = (dateKey) => {
+    const dayData = calendarData[dateKey]
+    if (!dayData) return 0
+    return Object.values(dayData.categories || {}).reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+  }
+
+  const getMonthTotal = () => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+    let total = 0
+    const { daysInMonth } = getMonthDays(year, month)
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateKey(year, month, day)
+      total += getDayTotal(dateKey)
+    }
+    return total
+  }
+
+  const getDaysWithEntries = () => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+    let count = 0
+    const { daysInMonth } = getMonthDays(year, month)
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateKey(year, month, day)
+      if (getDayTotal(dateKey) > 0) count++
+    }
+    return count
+  }
+
+  const prevMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))
+  }
+
+  const nextMonth = () => {
+    setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))
+  }
+
+  const openDateModal = (day) => {
+    const dateKey = formatDateKey(currentDate.getFullYear(), currentDate.getMonth(), day)
+    const existingData = calendarData[dateKey] || { categories: {}, notes: '' }
+    setSelectedDate({ day, dateKey, displayDate: `${MONTH_NAMES[currentDate.getMonth()]} ${day}, ${currentDate.getFullYear()}` })
+    setModalData({ ...existingData })
+  }
+
+  const closeModal = () => {
+    setSelectedDate(null)
+    setModalData({})
+  }
+
+  const saveModalData = () => {
+    setCalendarData(prev => ({
+      ...prev,
+      [selectedDate.dateKey]: modalData
+    }))
+    closeModal()
+  }
+
+  const updateModalCategory = (categoryId, value) => {
+    setModalData(prev => ({
+      ...prev,
+      categories: {
+        ...prev.categories,
+        [categoryId]: value
+      }
+    }))
+  }
+
+  const getSavingsLevel = (amount) => {
+    if (amount >= 100) return 'high'
+    if (amount >= 50) return 'medium'
+    if (amount > 0) return 'low'
+    return ''
+  }
+
+  const renderCalendar = () => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+    const { daysInMonth, startingDay } = getMonthDays(year, month)
+    const today = new Date()
+    const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month
+
+    const days = []
+
+    // Empty cells for days before the first of the month
+    for (let i = 0; i < startingDay; i++) {
+      days.push(<div key={`empty-${i}`} className="calendar-day empty"></div>)
+    }
+
+    // Days of the month
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateKey = formatDateKey(year, month, day)
+      const dayTotal = getDayTotal(dateKey)
+      const isToday = isCurrentMonth && today.getDate() === day
+      const savingsLevel = getSavingsLevel(dayTotal)
+
+      days.push(
+        <div
+          key={day}
+          className={`calendar-day ${isToday ? 'today' : ''} ${dayTotal > 0 ? 'has-entry' : ''} ${savingsLevel}`}
+          onClick={() => openDateModal(day)}
+        >
+          <span className="day-number">{day}</span>
+          {dayTotal > 0 && (
+            <span className="day-total">${dayTotal.toFixed(0)}</span>
+          )}
+        </div>
+      )
+    }
+
+    return days
+  }
+
+  const monthTotal = getMonthTotal()
+  const daysWithEntries = getDaysWithEntries()
+  const avgDaily = daysWithEntries > 0 ? monthTotal / daysWithEntries : 0
 
   return (
     <div className="app">
@@ -126,118 +268,265 @@ function App() {
         <p className="subtitle">Track savings across 11 categories</p>
       </header>
 
-      <div className="dashboard">
-        <div className="dashboard-card total-savings">
-          <div className="card-icon">💰</div>
-          <div className="card-content">
-            <span className="card-label">Total Monthly Savings</span>
-            <span className="card-value">${totalSavings.toFixed(2)}</span>
-          </div>
-        </div>
-
-        <div className="dashboard-card completion-status">
-          <div className="card-icon">✅</div>
-          <div className="card-content">
-            <span className="card-label">Categories Complete</span>
-            <span className="card-value">{completedCount} / {CATEGORIES.length}</span>
-          </div>
-        </div>
-
-        <div className="dashboard-card in-progress">
-          <div className="card-icon">🔄</div>
-          <div className="card-content">
-            <span className="card-label">In Progress</span>
-            <span className="card-value">{inProgressCount}</span>
-          </div>
-        </div>
-
-        <div className="progress-section">
-          <div className="progress-header">
-            <span>Overall Progress</span>
-            <span>{progressPercent.toFixed(0)}%</span>
-          </div>
-          <div className="progress-bar">
-            <div
-              className="progress-fill"
-              style={{ width: `${progressPercent}%` }}
-            />
-          </div>
-        </div>
+      {/* Navigation Tabs */}
+      <div className="nav-tabs">
+        <button
+          className={`nav-tab ${activeTab === 'categories' ? 'active' : ''}`}
+          onClick={() => setActiveTab('categories')}
+        >
+          <span className="tab-icon">📋</span>
+          Categories
+        </button>
+        <button
+          className={`nav-tab ${activeTab === 'calendar' ? 'active' : ''}`}
+          onClick={() => setActiveTab('calendar')}
+        >
+          <span className="tab-icon">📅</span>
+          Calendar
+        </button>
       </div>
 
-      <div className="categories">
-        {CATEGORIES.map(category => {
-          const catData = data[category.id]
-          const isExpanded = expandedCategory === category.id
-          const statusClass = catData.status.toLowerCase().replace(' ', '-')
+      {/* Categories View */}
+      {activeTab === 'categories' && (
+        <>
+          <div className="dashboard">
+            <div className="dashboard-card total-savings">
+              <div className="card-icon">💰</div>
+              <div className="card-content">
+                <span className="card-label">Total Monthly Savings</span>
+                <span className="card-value">${totalSavings.toFixed(2)}</span>
+              </div>
+            </div>
 
-          return (
-            <div
-              key={category.id}
-              className={`category-card ${statusClass} ${isExpanded ? 'expanded' : ''}`}
-            >
-              <div
-                className="category-header"
-                onClick={() => setExpandedCategory(isExpanded ? null : category.id)}
-              >
-                <div className="category-icon">{category.icon}</div>
-                <div className="category-info">
-                  <h3>{category.name}</h3>
-                  <p>{category.description}</p>
-                </div>
-                <div className="category-summary">
-                  {catData.savings && (
-                    <span className="savings-badge">${parseFloat(catData.savings).toFixed(2)}/mo</span>
+            <div className="dashboard-card completion-status">
+              <div className="card-icon">✅</div>
+              <div className="card-content">
+                <span className="card-label">Categories Complete</span>
+                <span className="card-value">{completedCount} / {CATEGORIES.length}</span>
+              </div>
+            </div>
+
+            <div className="dashboard-card in-progress">
+              <div className="card-icon">🔄</div>
+              <div className="card-content">
+                <span className="card-label">In Progress</span>
+                <span className="card-value">{inProgressCount}</span>
+              </div>
+            </div>
+
+            <div className="progress-section">
+              <div className="progress-header">
+                <span>Overall Progress</span>
+                <span>{progressPercent.toFixed(0)}%</span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="categories">
+            {CATEGORIES.map(category => {
+              const catData = data[category.id]
+              const isExpanded = expandedCategory === category.id
+              const statusClass = catData.status.toLowerCase().replace(' ', '-')
+
+              return (
+                <div
+                  key={category.id}
+                  className={`category-card ${statusClass} ${isExpanded ? 'expanded' : ''}`}
+                >
+                  <div
+                    className="category-header"
+                    onClick={() => setExpandedCategory(isExpanded ? null : category.id)}
+                  >
+                    <div className="category-icon">{category.icon}</div>
+                    <div className="category-info">
+                      <h3>{category.name}</h3>
+                      <p>{category.description}</p>
+                    </div>
+                    <div className="category-summary">
+                      {catData.savings && (
+                        <span className="savings-badge">${parseFloat(catData.savings).toFixed(2)}/mo</span>
+                      )}
+                      <span className={`status-badge ${statusClass}`}>{catData.status}</span>
+                    </div>
+                    <div className="expand-icon">{isExpanded ? '▲' : '▼'}</div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="category-details">
+                      <div className="form-group">
+                        <label>Monthly Savings ($)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Enter savings amount"
+                          value={catData.savings}
+                          onChange={(e) => updateCategory(category.id, 'savings', e.target.value)}
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label>Status</label>
+                        <div className="status-buttons">
+                          {STATUS_OPTIONS.map(status => (
+                            <button
+                              key={status}
+                              className={`status-btn ${catData.status === status ? 'active' : ''} ${status.toLowerCase().replace(' ', '-')}`}
+                              onClick={() => updateCategory(category.id, 'status', status)}
+                            >
+                              {status}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Notes & Details</label>
+                        <textarea
+                          placeholder="Add notes about this category..."
+                          value={catData.notes}
+                          onChange={(e) => updateCategory(category.id, 'notes', e.target.value)}
+                          rows={4}
+                        />
+                      </div>
+                    </div>
                   )}
-                  <span className={`status-badge ${statusClass}`}>{catData.status}</span>
                 </div>
-                <div className="expand-icon">{isExpanded ? '▲' : '▼'}</div>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Calendar View */}
+      {activeTab === 'calendar' && (
+        <div className="calendar-container">
+          {/* Monthly Summary */}
+          <div className="calendar-summary">
+            <div className="summary-card">
+              <span className="summary-icon">💰</span>
+              <div className="summary-content">
+                <span className="summary-label">Month Total</span>
+                <span className="summary-value">${monthTotal.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="summary-card">
+              <span className="summary-icon">📊</span>
+              <div className="summary-content">
+                <span className="summary-label">Daily Average</span>
+                <span className="summary-value">${avgDaily.toFixed(2)}</span>
+              </div>
+            </div>
+            <div className="summary-card">
+              <span className="summary-icon">📅</span>
+              <div className="summary-content">
+                <span className="summary-label">Days with Entries</span>
+                <span className="summary-value">{daysWithEntries}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Month Navigation */}
+          <div className="calendar-nav">
+            <button className="nav-btn" onClick={prevMonth}>◀ Prev</button>
+            <h2 className="calendar-title">
+              {MONTH_NAMES[currentDate.getMonth()]} {currentDate.getFullYear()}
+            </h2>
+            <button className="nav-btn" onClick={nextMonth}>Next ▶</button>
+          </div>
+
+          {/* Calendar Grid */}
+          <div className="calendar-grid">
+            {/* Day Headers */}
+            {DAY_NAMES.map(day => (
+              <div key={day} className="calendar-header">{day}</div>
+            ))}
+            {/* Calendar Days */}
+            {renderCalendar()}
+          </div>
+
+          {/* Legend */}
+          <div className="calendar-legend">
+            <div className="legend-item">
+              <span className="legend-dot high"></span>
+              <span>$100+</span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot medium"></span>
+              <span>$50-99</span>
+            </div>
+            <div className="legend-item">
+              <span className="legend-dot low"></span>
+              <span>$1-49</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Date Entry Modal */}
+      {selectedDate && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>📅 {selectedDate.displayDate}</h3>
+              <button className="modal-close" onClick={closeModal}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="modal-section">
+                <h4>Savings by Category</h4>
+                <div className="modal-categories">
+                  {CATEGORIES.map(category => (
+                    <div key={category.id} className="modal-category">
+                      <span className="modal-cat-icon">{category.icon}</span>
+                      <span className="modal-cat-name">{category.name}</span>
+                      <div className="modal-cat-input">
+                        <span className="input-prefix">$</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          value={modalData.categories?.[category.id] || ''}
+                          onChange={(e) => updateModalCategory(category.id, e.target.value)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
 
-              {isExpanded && (
-                <div className="category-details">
-                  <div className="form-group">
-                    <label>Monthly Savings ($)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Enter savings amount"
-                      value={catData.savings}
-                      onChange={(e) => updateCategory(category.id, 'savings', e.target.value)}
-                    />
-                  </div>
+              <div className="modal-section">
+                <h4>Notes for this day</h4>
+                <textarea
+                  placeholder="Add notes for this date..."
+                  value={modalData.notes || ''}
+                  onChange={(e) => setModalData(prev => ({ ...prev, notes: e.target.value }))}
+                  rows={3}
+                />
+              </div>
 
-                  <div className="form-group">
-                    <label>Status</label>
-                    <div className="status-buttons">
-                      {STATUS_OPTIONS.map(status => (
-                        <button
-                          key={status}
-                          className={`status-btn ${catData.status === status ? 'active' : ''} ${status.toLowerCase().replace(' ', '-')}`}
-                          onClick={() => updateCategory(category.id, 'status', status)}
-                        >
-                          {status}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label>Notes & Details</label>
-                    <textarea
-                      placeholder="Add notes about this category..."
-                      value={catData.notes}
-                      onChange={(e) => updateCategory(category.id, 'notes', e.target.value)}
-                      rows={4}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="modal-total">
+                <span>Day Total:</span>
+                <span className="modal-total-value">
+                  ${Object.values(modalData.categories || {}).reduce((sum, val) => sum + (parseFloat(val) || 0), 0).toFixed(2)}
+                </span>
+              </div>
             </div>
-          )
-        })}
-      </div>
+
+            <div className="modal-footer">
+              <button className="modal-btn cancel" onClick={closeModal}>Cancel</button>
+              <button className="modal-btn save" onClick={saveModalData}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="footer">
         <button className="reset-btn" onClick={resetAll}>
